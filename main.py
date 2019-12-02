@@ -6,7 +6,8 @@ import pygame
 # the configuration
 config = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 30}
 
-colors = [
+COLOR_GRID = (50, 50, 50)
+COLORS = [
     (0, 0, 0),
     (180, 0, 255),
     (0, 150, 0),
@@ -29,7 +30,33 @@ tetris_shapes = [
 ]
 
 
-def rand():
+class Bag7:
+    def __init__(self, getter, maxpeek=50):
+        self.getter = getter
+        self.maxpeek = maxpeek
+        self.b = [next(getter) for _ in range(maxpeek)]
+        self.i = 0
+
+    def pop(self):
+        result = self.b[self.i]
+        self.b[self.i] = next(self.getter)
+        self.i += 1
+        if self.i >= self.maxpeek:
+            self.i = 0
+        return result
+
+    def peek(self, n=3):
+        if not 0 <= n <= self.maxpeek:
+            raise ValueError('bad peek argument')
+        nthruend = self.maxpeek - self.i
+        if n <= nthruend:
+            result = self.b[self.i : self.i + n]
+        else:
+            result = self.b[self.i :] + self.b[: n - nthruend]
+        return result
+
+
+def shape_rand():
     rng = list(range(7))
     while True:
         random.shuffle(rng)
@@ -38,6 +65,13 @@ def rand():
 
 
 def rotate_clockwise(shape):
+    return [
+        [shape[y][x] for y in range(len(shape) - 1, -1, -1)]
+        for x in range(len(shape[0]))
+    ]
+
+
+def rotate_counter_clockwise(shape):
     return [
         [shape[y][x] for y in range(len(shape))]
         for x in range(len(shape[0]) - 1, -1, -1)
@@ -79,9 +113,12 @@ class TetrisApp:
     def __init__(self):
         pygame.init()
         pygame.key.set_repeat(250, 25)
-        self.width = config['cell_size'] * config['cols']
+        self.width = config['cell_size'] * (config['cols'] + 8)
         self.height = config['cell_size'] * config['rows']
-        self.gen = rand()
+        self.gen = Bag7(shape_rand())
+        self.hold = []
+        self.next_stones = None
+        self.holded = False
 
         self.screen = pygame.display.set_mode((self.width, self.height))
         # do not need mouse movement
@@ -89,10 +126,21 @@ class TetrisApp:
 
         self.init_game()
 
-    def new_stone(self):
-        self.stone = tetris_shapes[next(self.gen)]
+    def new_stone(self, s=None):
+        if s is None:
+            self.stone = tetris_shapes[self.gen.pop()]
+            self.holded = False
+        elif len(s) == 0:
+            self.stone = tetris_shapes[self.gen.pop()]
+            self.holded = True
+        else:
+            self.stone = s
+            self.holded = True
+
         self.stone_x = int(config['cols'] / 2 - len(self.stone[0]) / 2)
         self.stone_y = 0
+
+        self.next_stones = self.gen.peek()
 
         if check_collision(
             self.board, self.stone, (self.stone_x, self.stone_y)
@@ -102,6 +150,8 @@ class TetrisApp:
     def init_game(self):
         self.board = new_board()
         self.new_stone()
+        self.hold = []
+        self.holded = False
 
     def center_msg(self, msg):
         for i, line in enumerate(msg.splitlines()):
@@ -127,7 +177,7 @@ class TetrisApp:
                 if val:
                     pygame.draw.rect(
                         self.screen,
-                        colors[val],
+                        COLORS[val],
                         pygame.Rect(
                             (off_x + x) * config['cell_size'],
                             (off_y + y) * config['cell_size'],
@@ -136,6 +186,36 @@ class TetrisApp:
                         ),
                         0,
                     )
+
+    def draw_grid(self, board, offset):
+        off_x, off_y = offset
+        for y, row in enumerate(board):
+            pygame.draw.line(
+                self.screen,
+                COLOR_GRID,
+                (
+                    off_x * config['cell_size'],
+                    (off_y + y) * config['cell_size'],
+                ),
+                (
+                    (off_x + len(row)) * config['cell_size'],
+                    (off_y + y) * config['cell_size'],
+                ),
+            )
+
+        for x, col in enumerate(board[0]):
+            pygame.draw.line(
+                self.screen,
+                COLOR_GRID,
+                (
+                    (off_x + x) * config['cell_size'],
+                    off_y * config['cell_size'],
+                ),
+                (
+                    (off_x + x) * config['cell_size'],
+                    (off_y + len(board)) * config['cell_size'],
+                ),
+            )
 
     def move(self, delta_x):
         if not self.gameover and not self.paused:
@@ -154,7 +234,7 @@ class TetrisApp:
         pygame.display.update()
         sys.exit()
 
-    def drop(self):
+    def soft_drop(self):
         if not self.gameover and not self.paused:
             self.stone_y += 1
             if check_collision(
@@ -172,13 +252,45 @@ class TetrisApp:
                     else:
                         break
 
-    def rotate_stone(self):
+    def hard_drop(self):
+        if not self.gameover and not self.paused:
+            while not check_collision(
+                self.board, self.stone, (self.stone_x, self.stone_y)
+            ):
+                self.stone_y += 1
+            self.board = join_matrixes(
+                self.board, self.stone, (self.stone_x, self.stone_y)
+            )
+            self.new_stone()
+            while True:
+                for i, row in enumerate(self.board[:-1]):
+                    if 0 not in row:
+                        self.board = remove_row(self.board, i)
+                        break
+                else:
+                    break
+
+    def rotate_right(self):
         if not self.gameover and not self.paused:
             new_stone = rotate_clockwise(self.stone)
             if not check_collision(
                 self.board, new_stone, (self.stone_x, self.stone_y)
             ):
                 self.stone = new_stone
+
+    def rotate_left(self):
+        if not self.gameover and not self.paused:
+            new_stone = rotate_counter_clockwise(self.stone)
+            if not check_collision(
+                self.board, new_stone, (self.stone_x, self.stone_y)
+            ):
+                self.stone = new_stone
+
+    def hold_stone(self):
+        if not self.gameover and not self.paused:
+            if not self.holded:
+                self.stone, self.hold = self.hold, self.stone
+                self.new_stone(self.stone)
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -188,15 +300,23 @@ class TetrisApp:
             self.init_game()
             self.gameover = False
 
+    def restart_game(self):
+        self.init_game()
+        self.gameover = False
+
     def run(self):
         key_actions = {
             'ESCAPE': self.quit,
-            'LEFT': lambda: self.move(-1),
-            'RIGHT': lambda: self.move(1),
-            'DOWN': self.drop,
-            'UP': self.rotate_stone,
+            'a': lambda: self.move(-1),
+            'd': lambda: self.move(1),
+            's': self.soft_drop,
+            'w': self.hard_drop,
+            'k': self.rotate_right,
+            'm': self.rotate_left,
             'p': self.toggle_pause,
+            'q': self.hold_stone,
             'SPACE': self.start_game,
+            'BACKSPACE': self.restart_game,
         }
 
         self.gameover = False
@@ -212,14 +332,20 @@ class TetrisApp:
                 if self.paused:
                     self.center_msg('Paused')
                 else:
-                    self.draw_matrix(self.board, (0, 0))
-                    self.draw_matrix(self.stone, (self.stone_x, self.stone_y))
+                    self.draw_matrix(self.board, (4, 0))
+                    self.draw_matrix(
+                        self.stone, (self.stone_x + 4, self.stone_y)
+                    )
+                    self.draw_matrix(self.hold, (0, 0))
+                    for i, n in enumerate(self.next_stones):
+                        self.draw_matrix(tetris_shapes[n], (14, i * 5))
+                    self.draw_grid(self.board, (4, 0))
 
             pygame.display.update()
 
             for event in pygame.event.get():
                 if event.type == pygame.USEREVENT + 1:
-                    self.drop()
+                    self.soft_drop()
                 elif event.type == pygame.QUIT:
                     self.quit()
                 elif event.type == pygame.KEYDOWN:
