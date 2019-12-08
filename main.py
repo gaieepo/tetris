@@ -3,8 +3,8 @@ import sys
 
 import pygame
 
-# the configuration
-config = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 30}
+# configurations
+config = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 60}
 
 COLOR_GRID = (50, 50, 50)
 COLORS = [
@@ -18,15 +18,25 @@ COLORS = [
     (255, 255, 0),
 ]
 
-# define the shapes of the single parts
-tetris_shapes = [
-    [[1, 1, 1], [0, 1, 0]],
-    [[0, 2, 2], [2, 2, 0]],
-    [[3, 3, 0], [0, 3, 3]],
-    [[4, 0, 0], [4, 4, 4]],
-    [[0, 0, 5], [5, 5, 5]],
-    [[6, 6, 6, 6]],
-    [[7, 7], [7, 7]],
+
+def printit(func):
+    def f(*args, **kwargs):
+        rv = func(*args, **kwargs)
+        print(rv)
+        return rv
+
+    return f
+
+
+# define the shapes of the single mino
+mino_shapes = [
+    [[0, 1, 0], [1, 1, 1]],  # T
+    [[0, 2, 2], [2, 2, 0]],  # S
+    [[3, 3, 0], [0, 3, 3]],  # Z
+    [[4, 0, 0], [4, 4, 4]],  # J
+    [[0, 0, 5], [5, 5, 5]],  # L
+    [[6, 6, 6, 6]],  # I
+    [[7, 7], [7, 7]],  # O
 ]
 
 
@@ -109,15 +119,66 @@ def new_board():
     return board
 
 
+# heuristic utilities
+def complete_rows(board):
+    rv = 0
+    for row in board[:-1]:
+        if 0 not in row:
+            rv += 1
+    return rv
+
+
+def board_heights(board):
+    flipped = [False] * config['cols']
+    rv = [0] * config['cols']
+    for i, row in enumerate(reversed(board[:-1])):
+        for j, cell in enumerate(row):
+            if not cell and not flipped[j]:
+                rv[j] = i
+                flipped[j] = True
+            elif cell:
+                flipped[j] = False
+    return rv
+
+
+def board_max_height(board):
+    return max(board_heights(board))
+
+
+def board_total_height(board):
+    return sum(board_heights(board))
+
+
+def calc_bumpiness(board):
+    heights = board_heights(board)
+    rv = 0
+    for icol in range(1, config['cols']):
+        rv += abs(heights[icol] - heights[icol - 1])
+    return rv
+
+
+def count_holes(board):
+    rv = [0] * config['cols']
+    prevs = [0] * config['cols']
+    for i, row in enumerate(reversed(board)):
+        for j, cell in enumerate(row):
+            if cell:
+                if i > prevs[j] + 1:
+                    rv[j] += i - prevs[j] - 1
+                prevs[j] = i
+    return sum(rv)
+
+
 class TetrisApp:
     def __init__(self):
         pygame.init()
         pygame.key.set_repeat(250, 25)
+
         self.width = config['cell_size'] * (config['cols'] + 8)
         self.height = config['cell_size'] * config['rows']
         self.gen = Bag7(shape_rand())
         self.hold = []
-        self.next_stones = None
+        self.next_minos = None
         self.holded = False
 
         self.screen = pygame.display.set_mode((self.width, self.height))
@@ -126,32 +187,37 @@ class TetrisApp:
 
         self.init_game()
 
-    def new_stone(self, s=None):
+    def new_mino(self, s=None):
         if s is None:
-            self.stone = tetris_shapes[self.gen.pop()]
+            self.mino = mino_shapes[self.gen.pop()]
             self.holded = False
         elif len(s) == 0:
-            self.stone = tetris_shapes[self.gen.pop()]
+            self.mino = mino_shapes[self.gen.pop()]
             self.holded = True
         else:
-            self.stone = s
+            self.mino = s
             self.holded = True
 
-        self.stone_x = int(config['cols'] / 2 - len(self.stone[0]) / 2)
-        self.stone_y = 0
+        self.mino_x = int(config['cols'] / 2 - len(self.mino[0]) / 2)
+        self.mino_y = 0
 
-        self.next_stones = self.gen.peek()
+        self.next_minos = self.gen.peek()
 
-        if check_collision(
-            self.board, self.stone, (self.stone_x, self.stone_y)
-        ):
+        if check_collision(self.board, self.mino, (self.mino_x, self.mino_y)):
             self.gameover = True
 
     def init_game(self):
         self.board = new_board()
-        self.new_stone()
+        self.new_mino()
         self.hold = []
         self.holded = False
+
+    def ai(self):
+        print('board max height:', board_max_height(self.board))
+        print('board total height:', board_total_height(self.board))
+        print('complete rows:', complete_rows(self.board))
+        print('bumpiness:', calc_bumpiness(self.board))
+        print('holes:', count_holes(self.board))
 
     def center_msg(self, msg):
         for i, line in enumerate(msg.splitlines()):
@@ -219,15 +285,15 @@ class TetrisApp:
 
     def move(self, delta_x):
         if not self.gameover and not self.paused:
-            new_x = self.stone_x + delta_x
+            new_x = self.mino_x + delta_x
             if new_x < 0:
                 new_x = 0
-            if new_x > config['cols'] - len(self.stone[0]):
-                new_x = config['cols'] - len(self.stone[0])
+            if new_x > config['cols'] - len(self.mino[0]):
+                new_x = config['cols'] - len(self.mino[0])
             if not check_collision(
-                self.board, self.stone, (new_x, self.stone_y)
+                self.board, self.mino, (new_x, self.mino_y)
             ):
-                self.stone_x = new_x
+                self.mino_x = new_x
 
     def quit(self):
         self.center_msg('Exiting...')
@@ -236,14 +302,14 @@ class TetrisApp:
 
     def soft_drop(self):
         if not self.gameover and not self.paused:
-            self.stone_y += 1
+            self.mino_y += 1
             if check_collision(
-                self.board, self.stone, (self.stone_x, self.stone_y)
+                self.board, self.mino, (self.mino_x, self.mino_y)
             ):
                 self.board = join_matrixes(
-                    self.board, self.stone, (self.stone_x, self.stone_y)
+                    self.board, self.mino, (self.mino_x, self.mino_y)
                 )
-                self.new_stone()
+                self.new_mino()
                 while True:
                     for i, row in enumerate(self.board[:-1]):
                         if 0 not in row:
@@ -255,13 +321,13 @@ class TetrisApp:
     def hard_drop(self):
         if not self.gameover and not self.paused:
             while not check_collision(
-                self.board, self.stone, (self.stone_x, self.stone_y)
+                self.board, self.mino, (self.mino_x, self.mino_y)
             ):
-                self.stone_y += 1
+                self.mino_y += 1
             self.board = join_matrixes(
-                self.board, self.stone, (self.stone_x, self.stone_y)
+                self.board, self.mino, (self.mino_x, self.mino_y)
             )
-            self.new_stone()
+            self.new_mino()
             while True:
                 for i, row in enumerate(self.board[:-1]):
                     if 0 not in row:
@@ -272,25 +338,25 @@ class TetrisApp:
 
     def rotate_right(self):
         if not self.gameover and not self.paused:
-            new_stone = rotate_clockwise(self.stone)
+            new_mino = rotate_clockwise(self.mino)
             if not check_collision(
-                self.board, new_stone, (self.stone_x, self.stone_y)
+                self.board, new_mino, (self.mino_x, self.mino_y)
             ):
-                self.stone = new_stone
+                self.mino = new_mino
 
     def rotate_left(self):
         if not self.gameover and not self.paused:
-            new_stone = rotate_counter_clockwise(self.stone)
+            new_mino = rotate_counter_clockwise(self.mino)
             if not check_collision(
-                self.board, new_stone, (self.stone_x, self.stone_y)
+                self.board, new_mino, (self.mino_x, self.mino_y)
             ):
-                self.stone = new_stone
+                self.mino = new_mino
 
-    def hold_stone(self):
+    def hold_mino(self):
         if not self.gameover and not self.paused:
             if not self.holded:
-                self.stone, self.hold = self.hold, self.stone
-                self.new_stone(self.stone)
+                self.mino, self.hold = self.hold, self.mino
+                self.new_mino(self.mino)
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -314,7 +380,8 @@ class TetrisApp:
             'k': self.rotate_right,
             'm': self.rotate_left,
             'p': self.toggle_pause,
-            'q': self.hold_stone,
+            'q': self.hold_mino,
+            'i': self.ai,
             'SPACE': self.start_game,
             'BACKSPACE': self.restart_game,
         }
@@ -333,12 +400,10 @@ class TetrisApp:
                     self.center_msg('Paused')
                 else:
                     self.draw_matrix(self.board, (4, 0))
-                    self.draw_matrix(
-                        self.stone, (self.stone_x + 4, self.stone_y)
-                    )
+                    self.draw_matrix(self.mino, (self.mino_x + 4, self.mino_y))
                     self.draw_matrix(self.hold, (0, 0))
-                    for i, n in enumerate(self.next_stones):
-                        self.draw_matrix(tetris_shapes[n], (14, i * 5))
+                    for i, n in enumerate(self.next_minos):
+                        self.draw_matrix(mino_shapes[n], (14, i * 5))
                     self.draw_grid(self.board, (4, 0))
 
             pygame.display.update()

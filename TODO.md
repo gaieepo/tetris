@@ -1,8 +1,13 @@
 1. hold buffer (done)
 2. next few stones (done)
-3. spins
+3. spins (hold)
 4. score calculation
 5. networking
 6. elo and matching
 7. grid (done)
 8. 7bag (done)
+8.1 naive 7bag (done)
+8.2 certain deterministic 7bag, e.g. never begin with S or Z
+9. proper mino rotation
+10. better DAS ARR
+11. heuristic utilities (done)
