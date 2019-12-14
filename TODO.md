@@ -2,7 +2,7 @@
 2. next few stones (done)
 3. spins (hold)
 4. score calculation
-5. networking
+5. networking / pair play /competitive
 6. elo and matching
 7. grid (done)
 8. 7bag (done)
@@ -11,3 +11,5 @@
 9. proper mino rotation
 10. better DAS ARR
 11. heuristic utilities (done)
+12. basic ai (done)
+13. show lines cleared
