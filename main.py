@@ -11,20 +11,29 @@ random.seed(42)
 
 AI_DELAY = 100
 _WEIGHTS = [-0.510066, 0.760666, -0.35663, -0.184483]
+_FOUR_SEQUENCE = [
+    (0, 1, 2, 3),
+    (1, 0, 2, 3),
+    (1, 2, 0, 3),
+    (1, 2, 3, 0),
+    (0, 2, 1, 3),
+    (0, 2, 3, 1),
+    (0, 1, 3, 2),
+]
 
 config = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 60}
 
 COLOR_GRID = (50, 50, 50)
-COLORS = [
-    (0, 0, 0),
-    (180, 0, 255),
-    (0, 150, 0),
-    (255, 0, 0),
-    (0, 0, 255),
-    (255, 120, 0),
-    (0, 220, 220),
-    (255, 255, 0),
-]
+COLORS = {
+    0: (0, 0, 0),
+    1: (180, 0, 255),
+    3: (0, 150, 0),
+    5: (255, 0, 0),
+    7: (0, 0, 255),
+    9: (255, 120, 0),
+    11: (0, 220, 220),
+    13: (255, 255, 0),
+}
 
 
 # helpers
@@ -48,15 +57,28 @@ def time_convert(millis):
     return f'{mins}:{secs}'
 
 
+def gen_n_sequences(n):
+    s = [list(range(n))]
+    if n < 2:
+        return s
+    for i in range(n - 1):
+        l = list(range(n))
+        for j in range(i, n - 1):
+            l[j], l[j + 1] = l[j + 1], l[j]
+            s.append(l)
+    return s
+
+
 # define the 7 shapes of the single mino
-mino_shapes = [
+MINO_SHAPE_SYMBOLS = (0, 1, 3, 5, 7, 9, 11, 13)
+MINO_SHAPES = [
     [[0, 1, 0], [1, 1, 1]],  # T
-    [[0, 2, 2], [2, 2, 0]],  # S
-    [[3, 3, 0], [0, 3, 3]],  # Z
-    [[4, 0, 0], [4, 4, 4]],  # J
-    [[0, 0, 5], [5, 5, 5]],  # L
-    [[6, 6, 6, 6]],  # I
-    [[7, 7], [7, 7]],  # O
+    [[0, 3, 3], [3, 3, 0]],  # S
+    [[5, 5, 0], [0, 5, 5]],  # Z
+    [[7, 0, 0], [7, 7, 7]],  # J
+    [[0, 0, 9], [9, 9, 9]],  # L
+    [[11, 11, 11, 11]],  # I
+    [[13, 13], [13, 13]],  # O
 ]
 
 
@@ -123,7 +145,7 @@ def check_collision(board, shape, offset):
 def valid_state(board):
     for row in board:
         for col, cell in enumerate(row):
-            if cell > len(mino_shapes):
+            if cell not in MINO_SHAPE_SYMBOLS:
                 return False
     return True
 
@@ -228,10 +250,10 @@ class TetrisApp:
 
     def new_mino(self, s=None):
         if s is None:
-            self.mino = mino_shapes[self.gen.pop()]
+            self.mino = MINO_SHAPES[self.gen.pop()]
             self.holded = False
         elif len(s) == 0:
-            self.mino = mino_shapes[self.gen.pop()]
+            self.mino = MINO_SHAPES[self.gen.pop()]
             self.holded = True
         else:
             self.mino = s
@@ -262,50 +284,87 @@ class TetrisApp:
         if self.weights is None:
             self.weights = [_WEIGHTS[_] for _ in range(len(features))]
 
-        res = 0.0
+        score = 0.0
         for w, f in zip(self.weights, features):
-            res += w * f
+            score += w * f
 
-        return res
+        return score
 
     @printit
     def info(self):
         return self.evaluate(self.board)
 
+    def get_future_sequences(self, n=2):
+        assert 1 <= n <= 4, 'invalid range of preview'
+        combi = []
+        elements = [self.mino] + [
+            MINO_SHAPES[m] for m in self.next_minos[: n - 1]
+        ]
+        for s in gen_n_sequences(n):
+            combi.append(list(map(lambda x: elements[x], s)))
+        return combi
+
     def ai(self):
         if not self.gameover and not self.paused:
-            mino_directions = [
-                self.mino,
-                rotate_clockwise(self.mino),
-                rotate_clockwise(rotate_clockwise(self.mino)),
-                rotate_counter_clockwise(self.mino),
-            ]
-            locks = []
+            future_boards = []
+            for sequence in self.get_future_sequences(1):
+                # prev_boards = [(copy.deepcopy(self.board), None)]
+                prev_boards = [copy.deepcopy(self.board)]
+                for mino in sequence:
+                    next_boards = []
+                    # for prev_board, first_board in prev_boards:
+                    for prev_board in prev_boards:
+                        # print_instance(mino)
+                        # print_instance(prev_board)
+                        for rot_func in [
+                            lambda m: m,
+                            lambda m: rotate_clockwise(m),
+                            lambda m: rotate_clockwise(rotate_clockwise(m)),
+                            lambda m: rotate_counter_clockwise(m),
+                        ]:
+                            rot_mino = rot_func(mino)
+                            for x in range(
+                                config['cols'] - len(rot_mino[0]) + 1
+                            ):
+                                for y in range(config['rows']):
+                                    if check_collision(
+                                        prev_board, rot_mino, (x, y)
+                                    ):
+                                        next_board = join_matrixes(
+                                            copy.deepcopy(prev_board),
+                                            rot_mino,
+                                            (x, y),
+                                        )
+                                        if valid_state(next_board):
+                                            # if first_board is None:
+                                            #     first_board = next_board
+                                            # next_boards.append(
+                                            #     (next_board, first_board)
+                                            # )
+                                            next_boards.append(next_board)
+                                        break
+                    prev_boards = next_boards
+                    # print(prev_boards)
+                    if len(next_boards) == 0:  # no need proceed to next mino
+                        break
+                future_boards.extend(prev_boards)
 
-            for mino in mino_directions:
-                for x in range(config['cols'] - len(mino[0]) + 1):
-                    for y in range(config['rows']):
-                        if check_collision(self.board, mino, (x, y)):
-                            joint = join_matrixes(
-                                copy.deepcopy(self.board), mino, (x, y)
-                            )
-                            if valid_state(joint):
-                                locks.append(joint)
-                            break
-
-            scores = [self.evaluate(l) for l in locks]
-
-            if len(scores) == 0:
+            if len(future_boards) == 0:
                 self.gameover = True
             else:
-                self.board = locks[scores.index(max(scores))]
+                # scores = [self.evaluate(b) for b, _ in future_boards]
+                scores = [self.evaluate(b) for b in future_boards]
+                print(len(scores))
+
+                # self.board = future_boards[scores.index(max(scores))][1]
+                self.board = future_boards[scores.index(max(scores))]
                 self.new_mino()
                 self.clear_lines()
 
     def center_msg(self, msg):
         for i, line in enumerate(msg.splitlines()):
             msg_image = pygame.font.Font(
-                pygame.font.get_default_font(), 12
+                pygame.font.get_default_font(), 20
             ).render(line, False, (255, 255, 255), (0, 0, 0))
             msgim_center_x, msgim_center_y = msg_image.get_size()
             msgim_center_x //= 2
@@ -315,7 +374,7 @@ class TetrisApp:
                 msg_image,
                 (
                     self.width // 2 - msgim_center_x,
-                    self.height // 2 - msgim_center_y + i * 22,
+                    self.height // 2 - msgim_center_y + i * 30,
                 ),
             )
 
@@ -512,17 +571,16 @@ class TetrisApp:
                     'Press space to continue'
                 )
             else:
+                self.draw_matrix(self.board, (4, 0))
+                self.draw_matrix(self.mino, (self.mino_x + 4, self.mino_y))
+                self.draw_matrix(self.hold, (0, 0))
+                for i, n in enumerate(self.next_minos):
+                    self.draw_matrix(MINO_SHAPES[n], (14, i * 5))
+                self.draw_grid(self.board, (4, 0))
+                self.draw_score()
+                self.draw_timer()
                 if self.paused:
                     self.center_msg('Paused')
-                else:
-                    self.draw_matrix(self.board, (4, 0))
-                    self.draw_matrix(self.mino, (self.mino_x + 4, self.mino_y))
-                    self.draw_matrix(self.hold, (0, 0))
-                    for i, n in enumerate(self.next_minos):
-                        self.draw_matrix(mino_shapes[n], (14, i * 5))
-                    self.draw_grid(self.board, (4, 0))
-                    self.draw_score()
-                    self.draw_timer()
 
             pygame.display.update()
 

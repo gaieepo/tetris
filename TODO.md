@@ -12,4 +12,7 @@
 10. better DAS ARR
 11. heuristic utilities (done)
 12. basic ai (done)
-13. show lines cleared
+13. show lines cleared (done)
+14. timer
+14.2. basic timer (done)
+14.1. actual pause to pause timer
