@@ -6,22 +6,13 @@ import sys
 import pygame
 
 # configurations
+# random.seed(42)
+
 # board_total_height, complete_rows, calc_bumpiness, count_holes
-random.seed(42)
-
-AI_DELAY = 100
 _WEIGHTS = [-0.510066, 0.760666, -0.35663, -0.184483]
-_FOUR_SEQUENCE = [
-    (0, 1, 2, 3),
-    (1, 0, 2, 3),
-    (1, 2, 0, 3),
-    (1, 2, 3, 0),
-    (0, 2, 1, 3),
-    (0, 2, 3, 1),
-    (0, 1, 3, 2),
-]
 
-config = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 60}
+CONFIG = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
+AI_DELAY = 0
 
 COLOR_GRID = (50, 50, 50)
 COLORS = {
@@ -37,6 +28,10 @@ COLORS = {
 
 
 # helpers
+def encode_board(board):
+    return ''.join(''.join(map(str, row)) for row in board)
+
+
 def printit(func):
     def f(*args, **kwargs):
         rv = func(*args, **kwargs)
@@ -57,15 +52,25 @@ def time_convert(millis):
     return f'{mins}:{secs}'
 
 
-def gen_n_sequences(n):
+def gen_n_sequences(n, fix=False):
     s = [list(range(n))]
-    if n < 2:
-        return s
-    for i in range(n - 1):
-        l = list(range(n))
-        for j in range(i, n - 1):
-            l[j], l[j + 1] = l[j + 1], l[j]
-            s.append(l)
+    if not fix:
+        if n < 2:
+            return s
+        for i in range(n - 1):
+            l = list(range(n))
+            for j in range(i, n - 1):
+                l[j], l[j + 1] = l[j + 1], l[j]
+                s.append(l)
+    else:
+        if n < 3:
+            return s
+        # fix the first hold position
+        for i in range(1, n - 1):
+            l = list(range(n))
+            for j in range(i, n - 1):
+                l[j], l[j + 1] = l[j + 1], l[j]
+                s.append(l)
     return s
 
 
@@ -152,7 +157,7 @@ def valid_state(board):
 
 def remove_row(board, row):
     del board[row]
-    return [[0 for i in range(config['cols'])]] + board
+    return [[0 for i in range(CONFIG['cols'])]] + board
 
 
 def join_matrixes(mat1, mat2, mat2_off):
@@ -164,8 +169,8 @@ def join_matrixes(mat1, mat2, mat2_off):
 
 
 def new_board():
-    board = [[0 for x in range(config['cols'])] for y in range(config['rows'])]
-    board += [[1 for x in range(config['cols'])]]
+    board = [[0 for x in range(CONFIG['cols'])] for y in range(CONFIG['rows'])]
+    board += [[1 for x in range(CONFIG['cols'])]]
     return board
 
 
@@ -179,8 +184,8 @@ def complete_rows(board):
 
 
 def board_heights(board):
-    flipped = [False] * config['cols']
-    rv = [0] * config['cols']
+    flipped = [False] * CONFIG['cols']
+    rv = [0] * CONFIG['cols']
     for i, row in enumerate(reversed(board[:-1])):
         for j, cell in enumerate(row):
             if not cell and not flipped[j]:
@@ -202,14 +207,14 @@ def board_total_height(board):
 def calc_bumpiness(board):
     heights = board_heights(board)
     rv = 0
-    for icol in range(1, config['cols']):
+    for icol in range(1, CONFIG['cols']):
         rv += abs(heights[icol] - heights[icol - 1])
     return rv
 
 
 def count_holes(board):
-    rv = [0] * config['cols']
-    prevs = [0] * config['cols']
+    rv = [0] * CONFIG['cols']
+    prevs = [0] * CONFIG['cols']
     for i, row in enumerate(reversed(board)):
         for j, cell in enumerate(row):
             if cell:
@@ -223,11 +228,11 @@ class TetrisApp:
     def __init__(self, enable_ai=False, sprint=0):
         pygame.init()
         # TODO key repeat for A, S, D only
-        # pygame.key.set_repeat(250, 25)
+        pygame.key.set_repeat(250, 25)
 
         self.enable_ai = enable_ai
-        self.width = config['cell_size'] * (config['cols'] + 8)
-        self.height = config['cell_size'] * config['rows']
+        self.width = CONFIG['cell_size'] * (CONFIG['cols'] + 8)
+        self.height = CONFIG['cell_size'] * CONFIG['rows']
         self.gen = Bag7(shape_rand())
         self.hold = []
         self.next_minos = None
@@ -259,7 +264,7 @@ class TetrisApp:
             self.mino = s
             self.holded = True
 
-        self.mino_x = int(config['cols'] / 2 - len(self.mino[0]) / 2)
+        self.mino_x = int(CONFIG['cols'] / 2 - len(self.mino[0]) / 2)
         self.mino_y = 0
 
         self.next_minos = self.gen.peek()
@@ -275,14 +280,14 @@ class TetrisApp:
 
     def evaluate(self, board):
         features = [
-            # board_max_height(board),
+            board_max_height(board),
             board_total_height(board),
             complete_rows(board),
             calc_bumpiness(board),
             count_holes(board),
         ]
         if self.weights is None:
-            self.weights = [_WEIGHTS[_] for _ in range(len(features))]
+            self.weights = [random.random() for _ in range(len(features))]
 
         score = 0.0
         for w, f in zip(self.weights, features):
@@ -294,28 +299,29 @@ class TetrisApp:
     def info(self):
         return self.evaluate(self.board)
 
-    def get_future_sequences(self, n=2):
-        assert 1 <= n <= 4, 'invalid range of preview'
+    def get_future_sequences(self, n=3):
         combi = []
-        elements = [self.mino] + [
-            MINO_SHAPES[m] for m in self.next_minos[: n - 1]
-        ]
-        for s in gen_n_sequences(n):
+        if not self.hold:
+            elements = [self.mino] + [
+                MINO_SHAPES[m] for m in self.next_minos[: n - 1]
+            ]
+        else:
+            elements = [self.mino, self.hold] + [
+                MINO_SHAPES[m] for m in self.next_minos[: n - 2]
+            ]
+        for s in gen_n_sequences(2, fix=self.holded):
             combi.append(list(map(lambda x: elements[x], s)))
         return combi
 
     def ai(self):
+        memoize = set()
         if not self.gameover and not self.paused:
             future_boards = []
-            for sequence in self.get_future_sequences(1):
-                # prev_boards = [(copy.deepcopy(self.board), None)]
-                prev_boards = [copy.deepcopy(self.board)]
+            for sequence in self.get_future_sequences():
+                prev_boards = [(copy.deepcopy(self.board), None, None)]
                 for mino in sequence:
                     next_boards = []
-                    # for prev_board, first_board in prev_boards:
-                    for prev_board in prev_boards:
-                        # print_instance(mino)
-                        # print_instance(prev_board)
+                    for prev_board, first_board, first_mino in prev_boards:
                         for rot_func in [
                             lambda m: m,
                             lambda m: rotate_clockwise(m),
@@ -324,9 +330,9 @@ class TetrisApp:
                         ]:
                             rot_mino = rot_func(mino)
                             for x in range(
-                                config['cols'] - len(rot_mino[0]) + 1
+                                CONFIG['cols'] - len(rot_mino[0]) + 1
                             ):
-                                for y in range(config['rows']):
+                                for y in range(CONFIG['rows']):
                                     if check_collision(
                                         prev_board, rot_mino, (x, y)
                                     ):
@@ -335,16 +341,35 @@ class TetrisApp:
                                             rot_mino,
                                             (x, y),
                                         )
-                                        if valid_state(next_board):
-                                            # if first_board is None:
-                                            #     first_board = next_board
-                                            # next_boards.append(
-                                            #     (next_board, first_board)
-                                            # )
-                                            next_boards.append(next_board)
+                                        if (
+                                            valid_state(next_board)
+                                            and encode_board(next_board)
+                                            not in memoize
+                                        ):
+                                            memoize.add(
+                                                encode_board(next_board)
+                                            )
+                                            if (
+                                                first_board is None
+                                                and first_mino is None
+                                            ):
+                                                next_boards.append(
+                                                    (
+                                                        next_board,
+                                                        next_board,
+                                                        mino,
+                                                    )
+                                                )
+                                            else:
+                                                next_boards.append(
+                                                    (
+                                                        next_board,
+                                                        first_board,
+                                                        first_mino,
+                                                    )
+                                                )
                                         break
                     prev_boards = next_boards
-                    # print(prev_boards)
                     if len(next_boards) == 0:  # no need proceed to next mino
                         break
                 future_boards.extend(prev_boards)
@@ -352,14 +377,16 @@ class TetrisApp:
             if len(future_boards) == 0:
                 self.gameover = True
             else:
-                # scores = [self.evaluate(b) for b, _ in future_boards]
-                scores = [self.evaluate(b) for b in future_boards]
-                print(len(scores))
-
-                # self.board = future_boards[scores.index(max(scores))][1]
-                self.board = future_boards[scores.index(max(scores))]
-                self.new_mino()
-                self.clear_lines()
+                scores = [self.evaluate(b) for b, *_ in future_boards]
+                _, first_board, first_mino = future_boards[
+                    scores.index(max(scores))
+                ]
+                if first_mino == self.mino:
+                    self.board = first_board
+                    self.new_mino()
+                    self.clear_lines()
+                else:
+                    self.hold_mino()
 
     def center_msg(self, msg):
         for i, line in enumerate(msg.splitlines()):
@@ -410,10 +437,10 @@ class TetrisApp:
                         self.screen,
                         COLORS[val],
                         pygame.Rect(
-                            (off_x + x) * config['cell_size'],
-                            (off_y + y) * config['cell_size'],
-                            config['cell_size'],
-                            config['cell_size'],
+                            (off_x + x) * CONFIG['cell_size'],
+                            (off_y + y) * CONFIG['cell_size'],
+                            CONFIG['cell_size'],
+                            CONFIG['cell_size'],
                         ),
                         0,
                     )
@@ -425,12 +452,12 @@ class TetrisApp:
                 self.screen,
                 COLOR_GRID,
                 (
-                    off_x * config['cell_size'],
-                    (off_y + y) * config['cell_size'],
+                    off_x * CONFIG['cell_size'],
+                    (off_y + y) * CONFIG['cell_size'],
                 ),
                 (
-                    (off_x + len(row)) * config['cell_size'],
-                    (off_y + y) * config['cell_size'],
+                    (off_x + len(row)) * CONFIG['cell_size'],
+                    (off_y + y) * CONFIG['cell_size'],
                 ),
             )
 
@@ -439,12 +466,12 @@ class TetrisApp:
                 self.screen,
                 COLOR_GRID,
                 (
-                    (off_x + x) * config['cell_size'],
-                    off_y * config['cell_size'],
+                    (off_x + x) * CONFIG['cell_size'],
+                    off_y * CONFIG['cell_size'],
                 ),
                 (
-                    (off_x + x) * config['cell_size'],
-                    (off_y + len(board)) * config['cell_size'],
+                    (off_x + x) * CONFIG['cell_size'],
+                    (off_y + len(board)) * CONFIG['cell_size'],
                 ),
             )
 
@@ -453,8 +480,8 @@ class TetrisApp:
             new_x = self.mino_x + delta_x
             if new_x < 0:
                 new_x = 0
-            if new_x > config['cols'] - len(self.mino[0]):
-                new_x = config['cols'] - len(self.mino[0])
+            if new_x > CONFIG['cols'] - len(self.mino[0]):
+                new_x = CONFIG['cols'] - len(self.mino[0])
             if not check_collision(
                 self.board, self.mino, (new_x, self.mino_y)
             ):
@@ -557,7 +584,7 @@ class TetrisApp:
         self.gameover = False
         self.paused = False
 
-        pygame.time.set_timer(pygame.USEREVENT + 1, config['delay'])
+        pygame.time.set_timer(pygame.USEREVENT + 1, CONFIG['delay'])
 
         dont_burn_my_cpu = pygame.time.Clock()
 
@@ -567,8 +594,8 @@ class TetrisApp:
                 if self.timelapse is None:
                     self.timelapse = pygame.time.get_ticks()
                 self.center_msg(
-                    f'{time_convert(self.timelapse)} lapsed!!! '
-                    'Press space to continue'
+                    f'{time_convert(self.timelapse)} lapsed! '
+                    'Space to continue'
                 )
             else:
                 self.draw_matrix(self.board, (4, 0))
@@ -606,7 +633,7 @@ class TetrisApp:
                             if event.key == eval('pygame.K_' + key):
                                 key_actions[key]()
 
-            dont_burn_my_cpu.tick(config['maxfps'])
+            dont_burn_my_cpu.tick(CONFIG['maxfps'])
 
 
 if __name__ == "__main__":
