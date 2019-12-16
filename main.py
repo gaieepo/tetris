@@ -6,30 +6,32 @@ import sys
 import pygame
 
 # configurations
-# random.seed(42)
+random.seed(42)
 
 # board_total_height, complete_rows, calc_bumpiness, count_holes
 _WEIGHTS = [-0.510066, 0.760666, -0.35663, -0.184483]
+# _WEIGHTS = [0, 0, 0, 0]
 
-CONFIG = {'cell_size': 20, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
+CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
 AI_DELAY = 0
 
 COLOR_GRID = (50, 50, 50)
 COLORS = {
     0: (0, 0, 0),
-    1: (180, 0, 255),
-    3: (0, 150, 0),
-    5: (255, 0, 0),
-    7: (0, 0, 255),
-    9: (255, 120, 0),
-    11: (0, 220, 220),
-    13: (255, 255, 0),
+    1: (0, 0, 0),
+    3: (180, 0, 255),
+    5: (0, 150, 0),
+    7: (255, 0, 0),
+    9: (0, 0, 255),
+    11: (255, 120, 0),
+    13: (0, 220, 220),
+    15: (255, 255, 0),
 }
 
 
 # helpers
-def encode_board(board):
-    return ''.join(''.join(map(str, row)) for row in board)
+def encode_instance(obj):
+    return ''.join(''.join(map(str, row)) for row in obj)
 
 
 def printit(func):
@@ -61,7 +63,7 @@ def gen_n_sequences(n, fix=False):
             l = list(range(n))
             for j in range(i, n - 1):
                 l[j], l[j + 1] = l[j + 1], l[j]
-                s.append(l)
+                s.append(copy.deepcopy(l))
     else:
         if n < 3:
             return s
@@ -70,21 +72,45 @@ def gen_n_sequences(n, fix=False):
             l = list(range(n))
             for j in range(i, n - 1):
                 l[j], l[j + 1] = l[j + 1], l[j]
-                s.append(l)
+                s.append(copy.deepcopy(l))
     return s
 
 
 # define the 7 shapes of the single mino
-MINO_SHAPE_SYMBOLS = (0, 1, 3, 5, 7, 9, 11, 13)
+MINO_SHAPE_SYMBOLS = (0, 1, 3, 5, 7, 9, 11, 13, 15)
 MINO_SHAPES = [
-    [[0, 1, 0], [1, 1, 1]],  # T
-    [[0, 3, 3], [3, 3, 0]],  # S
-    [[5, 5, 0], [0, 5, 5]],  # Z
-    [[7, 0, 0], [7, 7, 7]],  # J
-    [[0, 0, 9], [9, 9, 9]],  # L
-    [[11, 11, 11, 11]],  # I
-    [[13, 13], [13, 13]],  # O
+    [[0, 3, 0], [3, 3, 3]],  # T
+    [[0, 5, 5], [5, 5, 0]],  # S
+    [[7, 7, 0], [0, 7, 7]],  # Z
+    [[9, 0, 0], [9, 9, 9]],  # J
+    [[0, 0, 11], [11, 11, 11]],  # L
+    [[13, 13, 13, 13]],  # I
+    [[15, 15], [15, 15]],  # O
 ]
+MINO_ROTS = {
+    '030333': [
+        [[0, 3, 0], [3, 3, 3]],
+        [[0, 3], [3, 3], [0, 3]],
+        [[3, 0], [3, 3], [3, 0]],
+        [[3, 3, 3], [0, 3, 0]],
+    ],
+    '055550': [[[0, 5, 5], [5, 5, 0]], [[5, 0], [5, 5], [0, 5]]],
+    '770077': [[[7, 7, 0], [0, 7, 7]], [[0, 7], [7, 7], [7, 0]]],
+    '900999': [
+        [[9, 0, 0], [9, 9, 9]],
+        [[0, 9], [0, 9], [9, 9]],
+        [[9, 9], [9, 0], [9, 0]],
+        [[9, 9, 9], [0, 0, 9]],
+    ],
+    '0011111111': [
+        [[0, 0, 11], [11, 11, 11]],
+        [[11, 11], [0, 11], [0, 11]],
+        [[11, 0], [11, 0], [11, 11]],
+        [[11, 11, 11], [11, 0, 0]],
+    ],
+    '13131313': [[[13, 13, 13, 13]], [[13], [13], [13], [13]]],
+    '15151515': [[[15, 15], [15, 15]]],
+}
 
 
 class Bag7:
@@ -280,14 +306,14 @@ class TetrisApp:
 
     def evaluate(self, board):
         features = [
-            board_max_height(board),
+            # board_max_height(board),
             board_total_height(board),
             complete_rows(board),
             calc_bumpiness(board),
             count_holes(board),
         ]
         if self.weights is None:
-            self.weights = [random.random() for _ in range(len(features))]
+            self.weights = [_WEIGHTS[_] for _ in range(len(features))]
 
         score = 0.0
         for w, f in zip(self.weights, features):
@@ -309,26 +335,20 @@ class TetrisApp:
             elements = [self.mino, self.hold] + [
                 MINO_SHAPES[m] for m in self.next_minos[: n - 2]
             ]
-        for s in gen_n_sequences(2, fix=self.holded):
+        for s in gen_n_sequences(n, fix=self.holded):
             combi.append(list(map(lambda x: elements[x], s)))
         return combi
 
     def ai(self):
-        memoize = set()
         if not self.gameover and not self.paused:
+            memoize = set()
             future_boards = []
-            for sequence in self.get_future_sequences():
+            for idx_seq, sequence in enumerate(self.get_future_sequences()):
                 prev_boards = [(copy.deepcopy(self.board), None, None)]
                 for mino in sequence:
                     next_boards = []
                     for prev_board, first_board, first_mino in prev_boards:
-                        for rot_func in [
-                            lambda m: m,
-                            lambda m: rotate_clockwise(m),
-                            lambda m: rotate_clockwise(rotate_clockwise(m)),
-                            lambda m: rotate_counter_clockwise(m),
-                        ]:
-                            rot_mino = rot_func(mino)
+                        for rot_mino in MINO_ROTS[encode_instance(mino)]:
                             for x in range(
                                 CONFIG['cols'] - len(rot_mino[0]) + 1
                             ):
@@ -341,14 +361,7 @@ class TetrisApp:
                                             rot_mino,
                                             (x, y),
                                         )
-                                        if (
-                                            valid_state(next_board)
-                                            and encode_board(next_board)
-                                            not in memoize
-                                        ):
-                                            memoize.add(
-                                                encode_board(next_board)
-                                            )
+                                        if valid_state(next_board):
                                             if (
                                                 first_board is None
                                                 and first_mino is None
@@ -369,15 +382,31 @@ class TetrisApp:
                                                     )
                                                 )
                                         break
+                    print('seq:', idx_seq)
+                    print('mino:')
+                    print_instance(mino)
+                    print('len next:', len(next_boards))
+                    print('-----')
                     prev_boards = next_boards
                     if len(next_boards) == 0:  # no need proceed to next mino
                         break
-                future_boards.extend(prev_boards)
+                print('len prev:', len(prev_boards))
+                flag = 0
+                for i, (b, *_) in enumerate(prev_boards):
+                    if encode_instance(b) not in memoize:
+                        flag += 1
+                        memoize.add(encode_instance(b))
+                        future_boards.append(prev_boards[i])
+                if flag:
+                    print('updated future!', flag)
+                print('len future:', len(future_boards))
 
             if len(future_boards) == 0:
                 self.gameover = True
             else:
                 scores = [self.evaluate(b) for b, *_ in future_boards]
+                print(len(scores))
+                print('>>>>>')
                 _, first_board, first_mino = future_boards[
                     scores.index(max(scores))
                 ]
@@ -492,18 +521,6 @@ class TetrisApp:
         pygame.display.update()
         sys.exit(0)
 
-    def soft_drop(self):
-        if not self.gameover and not self.paused:
-            self.mino_y += 1
-            if check_collision(
-                self.board, self.mino, (self.mino_x, self.mino_y)
-            ):
-                self.board = join_matrixes(
-                    self.board, self.mino, (self.mino_x, self.mino_y)
-                )
-                self.new_mino()
-                self.clear_lines()
-
     def clear_lines(self):
         while True:
             for i, row in enumerate(self.board[:-1]):
@@ -518,6 +535,18 @@ class TetrisApp:
                     break
             else:
                 break
+
+    def soft_drop(self):
+        if not self.gameover and not self.paused:
+            self.mino_y += 1
+            if check_collision(
+                self.board, self.mino, (self.mino_x, self.mino_y)
+            ):
+                self.board = join_matrixes(
+                    self.board, self.mino, (self.mino_x, self.mino_y)
+                )
+                self.new_mino()
+                self.clear_lines()
 
     def hard_drop(self):
         if not self.gameover and not self.paused:
