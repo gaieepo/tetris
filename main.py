@@ -8,10 +8,6 @@ import pygame
 # configurations
 random.seed(42)
 
-# board_total_height, complete_rows, calc_bumpiness, count_holes
-_WEIGHTS = [-0.510066, 0.760666, -0.35663, -0.184483]
-# _WEIGHTS = [0, 0, 0, 0]
-
 CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
 AI_DELAY = 0
 
@@ -37,7 +33,7 @@ def encode_instance(obj):
 def printit(func):
     def f(*args, **kwargs):
         rv = func(*args, **kwargs)
-        print(rv)
+        print(func.__name__, rv)
         return rv
 
     return f
@@ -238,6 +234,17 @@ def calc_bumpiness(board):
     return rv
 
 
+def calc_col_transition(board):
+    cnt = 0
+    for j in range(len(board[0])):
+        for i in range(1, len(board)):
+            if board[i][j] and not board[i - 1][j]:
+                cnt += 1
+            elif not board[i][j] and board[i - 1][j]:
+                cnt += 1
+    return cnt - CONFIG['cols']
+
+
 def count_holes(board):
     rv = [0] * CONFIG['cols']
     prevs = [0] * CONFIG['cols']
@@ -248,6 +255,24 @@ def count_holes(board):
                     rv[j] += i - prevs[j] - 1
                 prevs[j] = i
     return sum(rv)
+
+
+def count_full_lines(board):
+    count = 0
+    for i, row in enumerate(board[:-1]):
+        if 0 not in row:
+            count += 1
+    return count
+
+
+def calc_well(board):
+    cnt = 0
+    heights = board_heights(board)
+    heights = [100] + heights[:] + [100]
+    for i in range(1, len(heights) - 1):
+        if heights[i + 1] > heights[i] and heights[i - 1] > heights[i]:
+            cnt += min(heights[i + 1], heights[i - 1]) - heights[i]
+    return cnt
 
 
 class TetrisApp:
@@ -306,26 +331,26 @@ class TetrisApp:
 
     def evaluate(self, board):
         features = [
-            # board_max_height(board),
+            board_max_height(board),
             board_total_height(board),
             complete_rows(board),
             calc_bumpiness(board),
             count_holes(board),
+            count_full_lines(board),
+            calc_well(board),
+            calc_col_transition(board),
         ]
         if self.weights is None:
-            self.weights = [_WEIGHTS[_] for _ in range(len(features))]
-
-        score = 0.0
-        for w, f in zip(self.weights, features):
-            score += w * f
-
-        return score
+            self.weights = [
+                random.uniform(-1, 1) for _ in range(len(features))
+            ]
+        return sum(w * f for w, f in zip(self.weights, features))
 
     @printit
     def info(self):
         return self.evaluate(self.board)
 
-    def get_future_sequences(self, n=3):
+    def get_future_sequences(self, n=2):
         combi = []
         if not self.hold:
             elements = [self.mino] + [
@@ -382,31 +407,31 @@ class TetrisApp:
                                                     )
                                                 )
                                         break
-                    print('seq:', idx_seq)
-                    print('mino:')
-                    print_instance(mino)
-                    print('len next:', len(next_boards))
-                    print('-----')
+                    # print('seq:', idx_seq)
+                    # print('mino:')
+                    # print_instance(mino)
+                    # print('len next:', len(next_boards))
+                    # print('-----')
                     prev_boards = next_boards
                     if len(next_boards) == 0:  # no need proceed to next mino
                         break
-                print('len prev:', len(prev_boards))
-                flag = 0
+                # print('len prev:', len(prev_boards))
+                # flag = 0
                 for i, (b, *_) in enumerate(prev_boards):
                     if encode_instance(b) not in memoize:
-                        flag += 1
+                        # flag += 1
                         memoize.add(encode_instance(b))
                         future_boards.append(prev_boards[i])
-                if flag:
-                    print('updated future!', flag)
-                print('len future:', len(future_boards))
+                # if flag:
+                #     print('updated future!', flag)
+                # print('len future:', len(future_boards))
 
             if len(future_boards) == 0:
                 self.gameover = True
             else:
                 scores = [self.evaluate(b) for b, *_ in future_boards]
-                print(len(scores))
-                print('>>>>>')
+                # print(len(scores))
+                # print('>>>>>')
                 _, first_board, first_mino = future_boards[
                     scores.index(max(scores))
                 ]
