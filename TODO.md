@@ -17,3 +17,4 @@
 14.2. basic timer (done)
 14.1. actual pause to pause timer
 15. optimize calculation
+16. separate GUI and core

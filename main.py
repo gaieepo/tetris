@@ -9,7 +9,7 @@ import pygame
 random.seed(42)
 
 CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
-AI_DELAY = 0
+AI_DELAY = 100
 
 COLOR_GRID = (50, 50, 50)
 COLORS = {
@@ -197,14 +197,6 @@ def new_board():
 
 
 # heuristic utilities
-def complete_rows(board):
-    rv = 0
-    for row in board[:-1]:
-        if 0 not in row:
-            rv += 1
-    return rv
-
-
 def board_heights(board):
     flipped = [False] * CONFIG['cols']
     rv = [0] * CONFIG['cols']
@@ -293,9 +285,11 @@ class TetrisApp:
         self.is_sprint = True if sprint > 0 else False
         self.sprint_target = sprint
         self.weights = None
+        self.win = False
 
         self.screen = pygame.display.set_mode((self.width, self.height))
 
+        # Need key for functional
         # if enable_ai:
         #     pygame.event.set_blocked(pygame.KEYDOWN)
         #     pygame.event.set_blocked(pygame.KEYUP)
@@ -328,12 +322,12 @@ class TetrisApp:
         self.new_mino()
         self.hold = []
         self.holded = False
+        self.win = False
 
     def evaluate(self, board):
         features = [
             board_max_height(board),
             board_total_height(board),
-            complete_rows(board),
             calc_bumpiness(board),
             count_holes(board),
             count_full_lines(board),
@@ -341,9 +335,7 @@ class TetrisApp:
             calc_col_transition(board),
         ]
         if self.weights is None:
-            self.weights = [
-                random.uniform(-1, 1) for _ in range(len(features))
-            ]
+            self.weights = [-1.5, -1, -0.5, -2.0, 1.5, -0.5, -0.5]
         return sum(w * f for w, f in zip(self.weights, features))
 
     @printit
@@ -352,14 +344,17 @@ class TetrisApp:
 
     def get_future_sequences(self, n=2):
         combi = []
-        if not self.hold:
-            elements = [self.mino] + [
-                MINO_SHAPES[m] for m in self.next_minos[: n - 1]
-            ]
+        if n >= 2:
+            if not self.hold:
+                elements = [self.mino] + [
+                    MINO_SHAPES[m] for m in self.next_minos[: n - 1]
+                ]
+            else:
+                elements = [self.mino, self.hold] + [
+                    MINO_SHAPES[m] for m in self.next_minos[: n - 2]
+                ]
         else:
-            elements = [self.mino, self.hold] + [
-                MINO_SHAPES[m] for m in self.next_minos[: n - 2]
-            ]
+            elements = [self.mino]
         for s in gen_n_sequences(n, fix=self.holded):
             combi.append(list(map(lambda x: elements[x], s)))
         return combi
@@ -407,31 +402,19 @@ class TetrisApp:
                                                     )
                                                 )
                                         break
-                    # print('seq:', idx_seq)
-                    # print('mino:')
-                    # print_instance(mino)
-                    # print('len next:', len(next_boards))
-                    # print('-----')
                     prev_boards = next_boards
                     if len(next_boards) == 0:  # no need proceed to next mino
                         break
-                # print('len prev:', len(prev_boards))
-                # flag = 0
                 for i, (b, *_) in enumerate(prev_boards):
                     if encode_instance(b) not in memoize:
                         # flag += 1
                         memoize.add(encode_instance(b))
                         future_boards.append(prev_boards[i])
-                # if flag:
-                #     print('updated future!', flag)
-                # print('len future:', len(future_boards))
 
             if len(future_boards) == 0:
                 self.gameover = True
             else:
                 scores = [self.evaluate(b) for b, *_ in future_boards]
-                # print(len(scores))
-                # print('>>>>>')
                 _, first_board, first_mino = future_boards[
                     scores.index(max(scores))
                 ]
@@ -556,6 +539,7 @@ class TetrisApp:
                         self.is_sprint
                         and self.lines_cleared >= self.sprint_target
                     ):
+                        self.win = True
                         self.gameover = True
                     break
             else:
@@ -648,8 +632,10 @@ class TetrisApp:
                 if self.timelapse is None:
                     self.timelapse = pygame.time.get_ticks()
                 self.center_msg(
-                    f'{time_convert(self.timelapse)} lapsed! '
-                    'Space to continue'
+                    '{} lapsed! {}!'.format(
+                        time_convert(self.timelapse),
+                        'Win' if self.win else 'Lose',
+                    )
                 )
             else:
                 self.draw_matrix(self.board, (4, 0))
