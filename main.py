@@ -8,7 +8,7 @@ import pygame
 # configurations
 random.seed(42)
 
-CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 250, 'maxfps': 60}
+CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 60}
 AI_DELAY = 100
 
 COLOR_GRID = (50, 50, 50)
@@ -363,7 +363,7 @@ class TetrisApp:
         if not self.gameover and not self.paused:
             memoize = set()
             future_boards = []
-            for idx_seq, sequence in enumerate(self.get_future_sequences()):
+            for idx_seq, sequence in enumerate(self.get_future_sequences(1)):
                 prev_boards = [(copy.deepcopy(self.board), None, None)]
                 for mino in sequence:
                     next_boards = []
@@ -407,7 +407,6 @@ class TetrisApp:
                         break
                 for i, (b, *_) in enumerate(prev_boards):
                     if encode_instance(b) not in memoize:
-                        # flag += 1
                         memoize.add(encode_instance(b))
                         future_boards.append(prev_boards[i])
 
@@ -615,6 +614,7 @@ class TetrisApp:
             'p': self.toggle_pause,
             'q': self.hold_mino,
             'i': self.info,
+            'o': self.ai,
             'SPACE': self.start_game,
             'BACKSPACE': self.restart_game,
         }
