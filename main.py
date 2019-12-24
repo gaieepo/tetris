@@ -10,6 +10,7 @@ random.seed(42)
 
 CONFIG = {'cell_size': 30, 'cols': 10, 'rows': 20, 'delay': 750, 'maxfps': 60}
 AI_DELAY = 100
+SCORES = {1: 1, 2: 3, 3: 5, 4: 8}
 
 COLOR_GRID = (50, 50, 50)
 COLORS = {
@@ -280,12 +281,14 @@ class TetrisApp:
         self.hold = []
         self.next_minos = None
         self.holded = False
-        self.timelapse = None
+        self.starttime = None
+        self.timelapsed = None
         self.lines_cleared = 0
         self.is_sprint = True if sprint > 0 else False
         self.sprint_target = sprint
         self.weights = None
         self.win = False
+        self.score = 0
 
         self.screen = pygame.display.set_mode((self.width, self.height))
 
@@ -323,6 +326,9 @@ class TetrisApp:
         self.hold = []
         self.holded = False
         self.win = False
+        self.starttime = pygame.time.get_ticks()
+        self.lines_cleared = 0
+        self.score = 0
 
     def evaluate(self, board):
         features = [
@@ -442,14 +448,10 @@ class TetrisApp:
             )
 
     def draw_timer(self):
+        timelapse = pygame.time.get_ticks() - self.starttime
         msg_image = pygame.font.Font(
             pygame.font.get_default_font(), 32
-        ).render(
-            time_convert(pygame.time.get_ticks()),
-            False,
-            (255, 255, 255),
-            (0, 0, 0),
-        )
+        ).render(time_convert(timelapse), False, (255, 255, 255), (0, 0, 0))
         msgim_width, msgim_height = msg_image.get_size()
 
         self.screen.blit(
@@ -457,12 +459,23 @@ class TetrisApp:
         )
 
     def draw_score(self):
+        # lines cleared
         msg_image = pygame.font.Font(
             pygame.font.get_default_font(), 32
         ).render(str(self.lines_cleared), False, (255, 255, 255), (0, 0, 0))
         _, msgim_height = msg_image.get_size()
-
         self.screen.blit(msg_image, (0, self.height - msgim_height))
+
+        # score (actual)
+        # single - 100
+        # double - 300
+        # triple - 500
+        # tetris - 800
+        msg_image = pygame.font.Font(
+            pygame.font.get_default_font(), 32
+        ).render(str(self.score), False, (255, 255, 255), (0, 0, 0))
+        _, msgim_height = msg_image.get_size()
+        self.screen.blit(msg_image, (0, self.height - 2 * msgim_height - 10))
 
     def draw_matrix(self, matrix, offset):
         off_x, off_y = offset
@@ -529,11 +542,13 @@ class TetrisApp:
         sys.exit(0)
 
     def clear_lines(self):
+        lines_cleared_once = 0
         while True:
             for i, row in enumerate(self.board[:-1]):
                 if 0 not in row:
                     self.board = remove_row(self.board, i)
                     self.lines_cleared += 1
+                    lines_cleared_once += 1
                     if (
                         self.is_sprint
                         and self.lines_cleared >= self.sprint_target
@@ -543,6 +558,8 @@ class TetrisApp:
                     break
             else:
                 break
+        if lines_cleared_once in SCORES:
+            self.score += SCORES[lines_cleared_once]
 
     def soft_drop(self):
         if not self.gameover and not self.paused:
@@ -629,12 +646,12 @@ class TetrisApp:
         while True:
             self.screen.fill((0, 0, 0))
             if self.gameover:
-                if self.timelapse is None:
-                    self.timelapse = pygame.time.get_ticks()
+                if self.timelapsed is None:
+                    self.timelapsed = pygame.time.get_ticks() - self.starttime
                 self.center_msg(
                     '{} lapsed! {}!'.format(
-                        time_convert(self.timelapse),
-                        'Win' if self.win else 'Lose',
+                        time_convert(self.timelapsed),
+                        'You win' if self.win else 'You lose',
                     )
                 )
             else:
